@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clinic Appointment Booking</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>Clinic Appointment Booking</h1>
+
+    <section>
+      <h2>Available appointments</h2>
+      <p id="slot-status">Loading...</p>
+      <ul id="slot-list" class="slot-list"></ul>
+    </section>
+
+    <section id="booking-section" hidden>
+      <h2>Your details</h2>
+      <p id="selected-slot"></p>
+      <form id="booking-form">
+        <label for="name">Patient name</label>
+        <input id="name" name="name" placeholder="Enter your name" required>
+
+        <label for="email">Email address</label>
+        <input id="email" name="email" type="email" placeholder="Enter your email" required>
+
+        <button type="submit" id="confirm-btn">Confirm booking</button>
+      </form>
+      <p id="form-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="confirmation" class="confirmation" hidden></section>
+
+    <section>
+      <h2>Look up a booking</h2>
+      <form id="lookup-form">
+        <label for="ref">Booking reference</label>
+        <input id="ref" placeholder="Paste your booking reference">
+        <button type="submit">Find booking</button>
+      </form>
+      <ul id="lookup-list" class="slot-list"></ul>
+      <p id="lookup-error" class="error" role="alert"></p>
+    </section>
+
+    <section>
+      <h2>My bookings</h2>
+      <form id="mine-form">
+        <label for="mine-email">Email address</label>
+        <input id="mine-email" type="email" placeholder="Enter your email">
+        <button type="submit">Show my bookings</button>
+      </form>
+      <ul id="my-list" class="slot-list"></ul>
+      <button id="more-btn" type="button" hidden>Load more</button>
+      <p id="mine-error" class="error" role="alert"></p>
+    </section>
+  </main>
+  <script src="/static/script.js"></script>
+</body>
+</html>

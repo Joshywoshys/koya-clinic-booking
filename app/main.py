@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -307,3 +307,9 @@ def cancel_booking(booking_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="booking already cancelled")
 
     return booking_out(db.get(Booking, booking_id))
+
+
+
+from app.page import router as page_router
+
+app.include_router(page_router)
