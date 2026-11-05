@@ -3,11 +3,11 @@ import hashlib
 import json
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,12 +18,19 @@ from app.models import Booking, IdempotencyKey, RateLimitAttempt, Slot
 app = FastAPI()
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+RATE_LIMIT_MAX = 5
+RATE_LIMIT_WINDOW = timedelta(minutes=1)
 
 
 # Every error body must look like {"error": "..."}, as the spec requires
 @app.exception_handler(HTTPException)
 async def http_error_handler(request: Request, exc: HTTPException):
-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+    headers = getattr(exc, "headers", None)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail},
+        headers=headers,
+    )
 
 
 def get_db():
@@ -75,6 +82,34 @@ def booking_out(b: Booking) -> dict:
         "status": b.status,
         "created_at": iso(b.created_at),
     }
+
+
+def check_rate_limit(db: Session, email: str) -> None:
+    """Level 5: at most 5 attempts per email per minute. Every attempt is recorded,
+    including failed ones, so the count lives in the database and survives restarts."""
+    # Serialise attempts for the same email so two requests can't both slip under the limit
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtext(email))))
+
+    now = datetime.now(timezone.utc)
+    window_start = now - RATE_LIMIT_WINDOW
+    recent = db.scalars(
+        select(RateLimitAttempt.attempted_at)
+        .where(RateLimitAttempt.email == email, RateLimitAttempt.attempted_at > window_start)
+        .order_by(RateLimitAttempt.attempted_at)
+    ).all()
+
+    if len(recent) >= RATE_LIMIT_MAX:
+        # Wait until the oldest attempt in the window expires
+        retry_after = int((recent[0] + RATE_LIMIT_WINDOW - now).total_seconds()) + 1
+        db.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail="too many booking attempts for this email, try again later",
+            headers={"Retry-After": str(max(1, retry_after))},
+        )
+
+    db.add(RateLimitAttempt(email=email, attempted_at=now))
+    db.commit()
 
 
 @app.post("/reset", dependencies=[Depends(require_api_key)])
@@ -149,6 +184,10 @@ async def create_booking(
     slot_id = body.get("slot_id")
     name = body.get("name")
     email = body.get("email")
+
+    # Level 5 counts every attempt that names an email, including ones that fail validation
+    if isinstance(email, str) and email.strip():
+        check_rate_limit(db, email.strip().lower())
 
     # Level 2: required fields must be non-empty strings
     if not all(isinstance(v, str) for v in (slot_id, name, email)):
