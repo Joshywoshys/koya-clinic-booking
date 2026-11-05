@@ -34,17 +34,6 @@
     <section id="confirmation" class="confirmation" hidden></section>
 
     <section>
-      <h2>Look up a booking</h2>
-      <form id="lookup-form">
-        <label for="ref">Booking reference</label>
-        <input id="ref" placeholder="Paste your booking reference">
-        <button type="submit">Find booking</button>
-      </form>
-      <ul id="lookup-list" class="slot-list"></ul>
-      <p id="lookup-error" class="error" role="alert"></p>
-    </section>
-
-    <section>
       <h2>My bookings</h2>
       <form id="mine-form">
         <label for="mine-email">Email address</label>
@@ -54,6 +43,14 @@
       <ul id="my-list" class="slot-list"></ul>
       <button id="more-btn" type="button" hidden>Load more</button>
       <p id="mine-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="reschedule-panel" hidden>
+      <h2>Reschedule booking</h2>
+      <p id="reschedule-text"></p>
+      <ul id="reschedule-slots" class="slot-list"></ul>
+      <p id="reschedule-error" class="error" role="alert"></p>
+      <button id="reschedule-cancel" type="button">Keep my current booking</button>
     </section>
   </main>
   <script src="/static/script.js"></script>
