@@ -25,11 +25,10 @@ RATE_LIMIT_WINDOW = timedelta(minutes=1)
 # Every error body must look like {"error": "..."}, as the spec requires
 @app.exception_handler(HTTPException)
 async def http_error_handler(request: Request, exc: HTTPException):
-    headers = getattr(exc, "headers", None)
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": exc.detail},
-        headers=headers,
+        headers=getattr(exc, "headers", None),
     )
 
 
@@ -58,6 +57,11 @@ async def read_json(request: Request) -> dict:
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="request body must be a JSON object")
     return body
+
+
+# Async dependency: reads the body on the event loop, then hands it to a sync endpoint
+async def get_body(request: Request) -> dict:
+    return await read_json(request)
 
 
 def parse_time(value) -> datetime:
@@ -113,8 +117,7 @@ def check_rate_limit(db: Session, email: str) -> None:
 
 
 @app.post("/reset", dependencies=[Depends(require_api_key)])
-async def reset(request: Request, db: Session = Depends(get_db)):
-    body = await read_json(request)
+def reset(body: dict = Depends(get_body), db: Session = Depends(get_db)):
     raw_slots = body.get("slots")
     if not isinstance(raw_slots, list):
         raise HTTPException(status_code=400, detail="slots must be a list")
@@ -174,13 +177,11 @@ def list_slots(provider: str | None = None, db: Session = Depends(get_db)):
 
 
 @app.post("/bookings", status_code=201, dependencies=[Depends(require_api_key)])
-async def create_booking(
-    request: Request,
+def create_booking(
+    body: dict = Depends(get_body),
     db: Session = Depends(get_db),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    body = await read_json(request)
-
     slot_id = body.get("slot_id")
     name = body.get("name")
     email = body.get("email")
