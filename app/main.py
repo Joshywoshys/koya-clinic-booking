@@ -28,7 +28,7 @@ def get_db():
         db.close()
 
 
-# Level 2 check, applied to every endpoint
+# Level 2 check, added now because the spec requires it on every request
 def require_api_key(x_api_key: str | None = Header(default=None)):
     if x_api_key is None or not secrets.compare_digest(
         x_api_key.encode(), API_KEY.encode()
@@ -36,7 +36,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
-# Read the body ourselves so bad input returns the spec's 400, not FastAPI's 422
+# We read the body ourselves so bad input returns the spec's 400, not FastAPI's 422
 async def read_json(request: Request) -> dict:
     try:
         body = await request.json()
@@ -50,7 +50,7 @@ async def read_json(request: Request) -> dict:
 def parse_time(value) -> datetime:
     if not isinstance(value, str):
         raise ValueError("time must be a string")
-    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
@@ -90,9 +90,7 @@ async def reset(request: Request, db: Session = Depends(get_db)):
                 )
             )
         except (KeyError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=400, detail="each slot needs id, provider, start and end"
-            )
+            raise HTTPException(status_code=400, detail="each slot needs id, provider, start and end")
 
     # Bookings reference slots, so they must be deleted first
     db.execute(delete(RateLimitAttempt))
