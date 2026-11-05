@@ -1,10 +1,13 @@
+import base64
+import hashlib
+import json
 import re
 import secrets
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -31,7 +34,7 @@ def get_db():
         db.close()
 
 
-# Level 2 check, applied to every endpoint
+# Level 2: every endpoint requires the API key
 def require_api_key(x_api_key: str | None = Header(default=None)):
     if x_api_key is None or not secrets.compare_digest(
         x_api_key.encode(), API_KEY.encode()
@@ -136,7 +139,11 @@ def list_slots(provider: str | None = None, db: Session = Depends(get_db)):
 
 
 @app.post("/bookings", status_code=201, dependencies=[Depends(require_api_key)])
-async def create_booking(request: Request, db: Session = Depends(get_db)):
+async def create_booking(
+    request: Request,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
     body = await read_json(request)
 
     slot_id = body.get("slot_id")
@@ -156,6 +163,19 @@ async def create_booking(request: Request, db: Session = Depends(get_db)):
     if not EMAIL_PATTERN.match(email):
         raise HTTPException(status_code=400, detail="email is not valid")
 
+    # Level 4: fingerprint the request so reusing a key with a different body is detected
+    request_hash = hashlib.sha256(json.dumps([slot_id, name, email]).encode()).hexdigest()
+
+    if idempotency_key:
+        saved = db.get(IdempotencyKey, idempotency_key)
+        if saved is not None:
+            if saved.request_hash != request_hash:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency-Key was already used with a different request",
+                )
+            return JSONResponse(status_code=saved.status_code, content=saved.response_body)
+
     slot = db.get(Slot, slot_id)
     if slot is None:
         raise HTTPException(status_code=404, detail="slot not found")
@@ -171,7 +191,57 @@ async def create_booking(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="slot already booked")
     db.refresh(booking)
-    return booking_out(booking)
+    response = booking_out(booking)
+
+    if idempotency_key:
+        db.add(
+            IdempotencyKey(
+                key=idempotency_key,
+                request_hash=request_hash,
+                status_code=201,
+                response_body=response,
+            )
+        )
+        db.commit()
+    return response
+
+
+@app.get("/bookings", dependencies=[Depends(require_api_key)])
+def list_bookings(
+    email: str | None = None,
+    limit: str = "10",
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
+    if email is None or not email.strip():
+        raise HTTPException(status_code=400, detail="email is required")
+    email = email.strip().lower()
+
+    if not limit.isdigit() or not (1 <= int(limit) <= 50):
+        raise HTTPException(status_code=400, detail="limit must be an integer from 1 to 50")
+    page_size = int(limit)
+
+    # The cursor encodes the seq of the last booking on the previous page
+    after = 0
+    if cursor is not None:
+        try:
+            after = int(base64.urlsafe_b64decode(cursor).decode())
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid cursor")
+
+    rows = db.scalars(
+        select(Booking)
+        .where(Booking.email == email, Booking.seq > after)
+        .order_by(Booking.seq)
+        .limit(page_size + 1)
+    ).all()
+
+    page = rows[:page_size]
+    next_cursor = None
+    if len(rows) > page_size:
+        next_cursor = base64.urlsafe_b64encode(str(page[-1].seq).encode()).decode()
+
+    return {"bookings": [booking_out(b) for b in page], "next_cursor": next_cursor}
 
 
 @app.get("/bookings/{booking_id}", dependencies=[Depends(require_api_key)])
@@ -180,3 +250,20 @@ def get_booking(booking_id: str, db: Session = Depends(get_db)):
     if booking is None:
         raise HTTPException(status_code=404, detail="booking not found")
     return booking_out(booking)
+
+
+@app.delete("/bookings/{booking_id}", dependencies=[Depends(require_api_key)])
+def cancel_booking(booking_id: str, db: Session = Depends(get_db)):
+    result = db.execute(
+        update(Booking)
+        .where(Booking.id == booking_id, Booking.status == "confirmed")
+        .values(status="cancelled")
+    )
+    db.commit()
+
+    if result.rowcount == 0:
+        if db.get(Booking, booking_id) is None:
+            raise HTTPException(status_code=404, detail="booking not found")
+        raise HTTPException(status_code=409, detail="booking already cancelled")
+
+    return booking_out(db.get(Booking, booking_id))

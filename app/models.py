@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, ForeignKey, Index, JSON, text
+from sqlalchemy import String, DateTime, ForeignKey, Index, JSON, BigInteger, text
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.schema import Identity
 
 from app.database import Base
 
@@ -24,9 +25,11 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    # seq is a database-generated counter, used for ordering and pagination
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True, nullable=False)
     slot_id: Mapped[str] = mapped_column(ForeignKey("slots.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    email: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="confirmed")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
