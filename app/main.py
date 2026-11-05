@@ -1,3 +1,4 @@
+import re
 import secrets
 from datetime import datetime, timezone
 
@@ -12,6 +13,8 @@ from app.database import SessionLocal
 from app.models import Booking, IdempotencyKey, RateLimitAttempt, Slot
 
 app = FastAPI()
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # Every error body must look like {"error": "..."}, as the spec requires
@@ -28,7 +31,7 @@ def get_db():
         db.close()
 
 
-# Level 2 check, added now because the spec requires it on every request
+# Level 2 check, applied to every endpoint
 def require_api_key(x_api_key: str | None = Header(default=None)):
     if x_api_key is None or not secrets.compare_digest(
         x_api_key.encode(), API_KEY.encode()
@@ -36,7 +39,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
-# We read the body ourselves so bad input returns the spec's 400, not FastAPI's 422
+# Read the body ourselves so bad input returns the spec's 400, not FastAPI's 422
 async def read_json(request: Request) -> dict:
     try:
         body = await request.json()
@@ -50,7 +53,7 @@ async def read_json(request: Request) -> dict:
 def parse_time(value) -> datetime:
     if not isinstance(value, str):
         raise ValueError("time must be a string")
-    dt = datetime.fromisoformat(value)
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
@@ -90,7 +93,9 @@ async def reset(request: Request, db: Session = Depends(get_db)):
                 )
             )
         except (KeyError, TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="each slot needs id, provider, start and end")
+            raise HTTPException(
+                status_code=400, detail="each slot needs id, provider, start and end"
+            )
 
     # Bookings reference slots, so they must be deleted first
     db.execute(delete(RateLimitAttempt))
@@ -133,13 +138,29 @@ def list_slots(provider: str | None = None, db: Session = Depends(get_db)):
 @app.post("/bookings", status_code=201, dependencies=[Depends(require_api_key)])
 async def create_booking(request: Request, db: Session = Depends(get_db)):
     body = await read_json(request)
-    slot_id = str(body.get("slot_id", "")).strip()
-    name = str(body.get("name", "")).strip()
-    email = str(body.get("email", "")).strip().lower()
 
-    # Level 2 will add the full validation rules here
-    if db.get(Slot, slot_id) is None:
+    slot_id = body.get("slot_id")
+    name = body.get("name")
+    email = body.get("email")
+
+    # Level 2: required fields must be non-empty strings
+    if not all(isinstance(v, str) for v in (slot_id, name, email)):
+        raise HTTPException(status_code=400, detail="slot_id, name and email are required")
+
+    slot_id = slot_id.strip()
+    name = name.strip()
+    email = email.strip().lower()
+
+    if not slot_id or not name or not email:
+        raise HTTPException(status_code=400, detail="slot_id, name and email are required")
+    if not EMAIL_PATTERN.match(email):
+        raise HTTPException(status_code=400, detail="email is not valid")
+
+    slot = db.get(Slot, slot_id)
+    if slot is None:
         raise HTTPException(status_code=404, detail="slot not found")
+    if slot.start <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="slot has already started")
 
     booking = Booking(slot_id=slot_id, name=name, email=email, status="confirmed")
     db.add(booking)
