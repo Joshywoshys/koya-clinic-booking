@@ -13,16 +13,16 @@ A booking API and web page for a clinic. Patients see available appointment slot
 - **Development:** GitHub Codespaces
 
 ## Project structure
-app/
-config.py reads DATABASE_URL and API_KEY from environment variables
-database.py database engine and session setup
-models.py tables: slots, bookings, idempotency keys, rate-limit attempts
-main.py API endpoints from the specification
-page.py web page routes; these call the API on the server with the key
-static/ index.html, style.css, script.js
-tests/ one test script per level
-requirements.txt
-.env.example template for required environment variables
+- app/
+- config.py reads DATABASE_URL and API_KEY from environment variables
+- database.py database engine and session setup
+- models.py tables: slots, bookings, idempotency keys, rate-limit attempts
+- main.py API endpoints from the specification
+- page.py web page routes; these call the API on the server with the key
+- static/ index.html, style.css, script.js
+- tests/ one test script per level
+- requirements.txt
+- .env.example template for required environment variables
 
 
 ## Running locally
